@@ -46,7 +46,7 @@
     }
 
     .user-box,
-    .record-box,
+    .filter-box,
     .actions,
     .list-box {
       background: #223141;
@@ -198,7 +198,7 @@
   <main class="app">
     <h1>Marcador de Clipes ⚽</h1>
     <p class="subtitle">
-      Clique no botão quando acontecer uma jogada importante. Agora os horários são salvos no Supabase para todos acessarem a mesma lista.
+      Clique no botão quando acontecer uma jogada importante. Os horários são salvos no Supabase para todos acessarem a mesma lista.
     </p>
 
     <div id="connectionNotice" class="notice warning">
@@ -208,18 +208,14 @@
     <section class="user-box">
       <label for="userName">Nome da pessoa</label>
       <input id="userName" type="text" placeholder="Digite seu nome" />
+      <p id="ceoStatus" class="small hidden" style="margin-top: 10px;">CEO autenticado.</p>
     </section>
 
-    <section id="recordBox" class="record-box hidden">
+    <section id="filterBox" class="filter-box hidden">
+      <label for="filterDate">Filtrar horários por dia</label>
       <div class="grid">
-        <div>
-          <label for="recordDate">Data da gravação</label>
-          <input id="recordDate" type="date" />
-        </div>
-        <div>
-          <label for="recordStart">Horário que começou a gravar</label>
-          <input id="recordStart" type="time" step="1" />
-        </div>
+        <input id="filterDate" type="date" />
+        <button class="muted" onclick="clearDateFilter()">Limpar filtro</button>
       </div>
     </section>
 
@@ -233,7 +229,7 @@
       <br />
       <button class="muted" onclick="loadClips()">Atualizar lista</button>
       <br id="deleteBreak" class="hidden" />
-      <button id="deleteBtn" class="danger hidden" onclick="deleteAll()">Excluir todos os horários</button>
+      <button id="deleteBtn" class="danger hidden" onclick="deleteAllVisible()">Excluir horários exibidos</button>
     </section>
 
     <section class="list-box">
@@ -244,28 +240,27 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    // 1) Cole aqui os dados do seu projeto Supabase.
     // Use Project URL e Publishable key. NÃO use service_role e NÃO use Direct connection string.
     const SUPABASE_URL = 'https://coaxojxclxpxrumsptqx.supabase.co'
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_McTZJCF3QwwO08nfe5ic-A_lUjYPrL-'
 
     const USER_KEY = 'marcador_clipes_nome'
-    const RECORD_DATE_KEY = 'marcador_clipes_record_date'
-    const RECORD_START_KEY = 'marcador_clipes_record_start'
 
     const userNameInput = document.getElementById('userName')
-    const recordDateInput = document.getElementById('recordDate')
-    const recordStartInput = document.getElementById('recordStart')
-    const recordBox = document.getElementById('recordBox')
+    const filterDateInput = document.getElementById('filterDate')
+    const filterBox = document.getElementById('filterBox')
     const exportBtn = document.getElementById('exportBtn')
     const clipsList = document.getElementById('clipsList')
     const deleteBtn = document.getElementById('deleteBtn')
     const deleteBreak = document.getElementById('deleteBreak')
     const markBtn = document.getElementById('markBtn')
     const connectionNotice = document.getElementById('connectionNotice')
+    const ceoStatus = document.getElementById('ceoStatus')
 
     let db = null
     let clipsCache = []
+    let ceoAuthenticated = false
+    let ceoPasswordSession = ''
 
     function pad(value) {
       return String(value).padStart(2, '0')
@@ -297,48 +292,75 @@
       return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
     }
 
-    function formatDuration(totalSeconds) {
-      if (totalSeconds < 0 || Number.isNaN(totalSeconds)) return 'Início inválido'
-
-      const hours = Math.floor(totalSeconds / 3600)
-      const minutes = Math.floor((totalSeconds % 3600) / 60)
-      const seconds = totalSeconds % 60
-
-      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
-    }
-
     function getUserName() {
       return userNameInput.value.trim()
     }
 
-    function isCEO() {
+    function isCEOName() {
       return getUserName().toUpperCase() === 'CEO'
     }
 
-    function getRecordingStartDate() {
-      const date = recordDateInput.value
-      const time = recordStartInput.value
-
-      if (!date || !time) return null
-
-      return new Date(`${date}T${time}`)
+    function isCEOAuthenticated() {
+      return isCEOName() && ceoAuthenticated === true
     }
 
-    function getVideoTimeFromClickDate(clickDate) {
-      const startDate = getRecordingStartDate()
-      if (!startDate) return 'Não configurado'
+    async function requestCEOLogin() {
+      if (!isCEOName()) {
+        ceoAuthenticated = false
+        ceoPasswordSession = ''
+        return false
+      }
 
-      const diffInSeconds = Math.floor((clickDate.getTime() - startDate.getTime()) / 1000)
-      return formatDuration(diffInSeconds)
+      if (!db) {
+        alert('Supabase ainda não está configurado no código.')
+        return false
+      }
+
+      if (isCEOAuthenticated()) return true
+
+      const password = prompt('Login do CEO: digite a senha')
+
+      if (!password) {
+        ceoAuthenticated = false
+        ceoPasswordSession = ''
+        return false
+      }
+
+      const { data, error } = await db.rpc('verify_ceo_password', {
+        password_input: password
+      })
+
+      if (error) {
+        console.error(error)
+        alert('Erro ao validar senha do CEO. Confira se a função verify_ceo_password foi criada no Supabase.')
+        ceoAuthenticated = false
+        ceoPasswordSession = ''
+        return false
+      }
+
+      if (data === true) {
+        ceoAuthenticated = true
+        ceoPasswordSession = password
+        alert('CEO autenticado com sucesso.')
+        return true
+      }
+
+      ceoAuthenticated = false
+      ceoPasswordSession = ''
+      alert('Senha incorreta. Você será alterado para usuário comum.')
+      userNameInput.value = ''
+      localStorage.removeItem(USER_KEY)
+      return false
     }
 
     function updatePermissions() {
-      const ceo = isCEO()
+      const ceo = isCEOAuthenticated()
 
-      recordBox.classList.toggle('hidden', !ceo)
+      filterBox.classList.toggle('hidden', !ceo)
       exportBtn.classList.toggle('hidden', !ceo)
       deleteBtn.classList.toggle('hidden', !ceo)
       deleteBreak.classList.toggle('hidden', !ceo)
+      ceoStatus.classList.toggle('hidden', !ceo)
     }
 
     function validateSupabaseConfig() {
@@ -356,7 +378,7 @@
       }
 
       db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
-      connectionNotice.textContent = 'Conectado ao Supabase. Os horários agora ficam em uma lista única online.'
+      connectionNotice.textContent = 'Conectado ao Supabase. Os horários ficam em uma lista única online.'
       connectionNotice.classList.remove('warning')
       markBtn.disabled = false
       return true
@@ -371,17 +393,19 @@
         return
       }
 
+      if (isCEOName() && !isCEOAuthenticated()) {
+        const logged = await requestCEOLogin()
+        updatePermissions()
+
+        if (!logged) return
+      }
+
       if (!db) {
         alert('Supabase ainda não está configurado no código.')
         return
       }
 
       localStorage.setItem(USER_KEY, userName)
-
-      if (isCEO()) {
-        localStorage.setItem(RECORD_DATE_KEY, recordDateInput.value)
-        localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
-      }
 
       markBtn.disabled = true
       markBtn.textContent = 'SALVANDO...'
@@ -407,15 +431,38 @@
       await loadClips()
     }
 
+    function getSelectedDateRange() {
+      if (!filterDateInput.value) return null
+
+      const start = new Date(`${filterDateInput.value}T00:00:00`)
+      const end = new Date(`${filterDateInput.value}T23:59:59.999`)
+
+      return {
+        start: start.toISOString(),
+        end: end.toISOString()
+      }
+    }
+
     async function loadClips() {
       if (!db) return
 
+      updatePermissions()
       clipsList.innerHTML = '<p class="empty">Carregando horários...</p>'
 
-      const { data, error } = await db
+      let query = db
         .from('clips')
         .select('id, user_name, client_clicked_at, created_at')
         .order('client_clicked_at', { ascending: false })
+
+      const range = isCEOAuthenticated() ? getSelectedDateRange() : null
+
+      if (range) {
+        query = query
+          .gte('client_clicked_at', range.start)
+          .lte('client_clicked_at', range.end)
+      }
+
+      const { data, error } = await query
 
       if (error) {
         console.error(error)
@@ -428,8 +475,8 @@
     }
 
     async function deleteClip(id) {
-      if (!isCEO()) {
-        alert('Somente CEO pode excluir horários.')
+      if (!isCEOAuthenticated()) {
+        alert('Somente CEO autenticado pode excluir horários.')
         return
       }
 
@@ -438,39 +485,50 @@
       const confirmed = confirm('Excluir este horário?')
       if (!confirmed) return
 
-      const { error } = await db
-        .from('clips')
-        .delete()
-        .eq('id', id)
+      const { error } = await db.rpc('delete_clip_by_ceo', {
+        password_input: ceoPasswordSession,
+        clip_id_input: id
+      })
 
       if (error) {
         console.error(error)
-        alert('Erro ao excluir. Confira se a policy de DELETE foi criada no Supabase.')
+        alert('Erro ao excluir. Confira se a função delete_clip_by_ceo foi criada no Supabase.')
         return
       }
 
       await loadClips()
     }
 
-    async function deleteAll() {
-      if (!isCEO()) {
-        alert('Somente CEO pode excluir horários.')
+    async function deleteAllVisible() {
+      if (!isCEOAuthenticated()) {
+        alert('Somente CEO autenticado pode excluir horários.')
         return
       }
 
       if (!db) return
 
-      const confirmed = confirm('Tem certeza que deseja excluir todos os horários?')
+      if (clipsCache.length === 0) {
+        alert('Nenhum horário exibido para excluir.')
+        return
+      }
+
+      const message = filterDateInput.value
+        ? `Tem certeza que deseja excluir todos os horários exibidos do dia ${formatDateBR(filterDateInput.value)}?`
+        : 'Tem certeza que deseja excluir todos os horários exibidos?'
+
+      const confirmed = confirm(message)
       if (!confirmed) return
 
-      const { error } = await db
-        .from('clips')
-        .delete()
-        .gte('created_at', '1900-01-01')
+      const ids = clipsCache.map(clip => clip.id)
+
+      const { error } = await db.rpc('delete_clips_by_ceo', {
+        password_input: ceoPasswordSession,
+        clip_ids_input: ids
+      })
 
       if (error) {
         console.error(error)
-        alert('Erro ao excluir todos. Confira se a policy de DELETE foi criada no Supabase.')
+        alert('Erro ao excluir os horários exibidos. Confira se a função delete_clips_by_ceo foi criada no Supabase.')
         return
       }
 
@@ -478,8 +536,8 @@
     }
 
     function exportTxt() {
-      if (!isCEO()) {
-        alert('Somente CEO pode exportar os horários.')
+      if (!isCEOAuthenticated()) {
+        alert('Somente CEO autenticado pode exportar os horários.')
         return
       }
 
@@ -500,6 +558,10 @@
       let content = 'MARCADOR DE CLIPES DO FUTEBOL\n'
       content += '================================\n\n'
 
+      if (filterDateInput.value) {
+        content += `FILTRO: ${formatDateBR(filterDateInput.value)}\n\n`
+      }
+
       Object.keys(grouped).sort().forEach(day => {
         content += `DIA ${formatDateBR(day)}\n`
         content += '--------------------------------\n'
@@ -509,9 +571,8 @@
           .forEach((clip, index) => {
             const clickDate = new Date(clip.client_clicked_at)
             const realTime = formatTime(clickDate)
-            const videoTime = getVideoTimeFromClickDate(clickDate)
 
-            content += `${index + 1}. ${realTime} | Vídeo: ${videoTime} | Pessoa: ${clip.user_name}\n`
+            content += `${index + 1}. ${realTime} | Pessoa: ${clip.user_name}\n`
           })
 
         content += '\n'
@@ -526,18 +587,27 @@
       URL.revokeObjectURL(url)
     }
 
+    function clearDateFilter() {
+      filterDateInput.value = ''
+      loadClips()
+    }
+
     function changeUser() {
       localStorage.removeItem(USER_KEY)
+      ceoAuthenticated = false
+      ceoPasswordSession = ''
       userNameInput.value = ''
       userNameInput.focus()
+      clipsCache = []
       renderClips()
+      loadClips()
     }
 
     function renderClips() {
       updatePermissions()
 
       const clips = [...clipsCache].sort((a, b) => new Date(b.client_clicked_at) - new Date(a.client_clicked_at))
-      const ceo = isCEO()
+      const ceo = isCEOAuthenticated()
 
       if (clips.length === 0) {
         clipsList.innerHTML = '<p class="empty">Nenhum horário marcado ainda.</p>'
@@ -546,16 +616,14 @@
 
       clipsList.innerHTML = clips.map(clip => {
         const clickDate = new Date(clip.client_clicked_at)
-        const videoTime = getVideoTimeFromClickDate(clickDate)
 
         return `
           <article class="clip-item">
             <div class="clip-header">
               <strong>${formatLocalDateBR(clickDate)} - ${formatTime(clickDate)}</strong>
-              ${ceo ? `<span class="tag">${escapeHtml(videoTime)}</span>` : ''}
+              ${ceo ? '<span class="tag">CEO</span>' : ''}
             </div>
             <p class="small">Marcado por: ${escapeHtml(clip.user_name)}</p>
-            ${ceo ? `<p class="small">Tempo do vídeo calculado pelo horário de início da gravação.</p>` : ''}
             ${ceo ? `<br><button class="danger" onclick="deleteClip('${clip.id}')">Excluir este horário</button>` : ''}
           </article>
         `
@@ -564,8 +632,6 @@
 
     async function loadInitialData() {
       const savedUser = localStorage.getItem(USER_KEY)
-      const savedRecordDate = localStorage.getItem(RECORD_DATE_KEY)
-      const savedRecordStart = localStorage.getItem(RECORD_START_KEY)
 
       if (savedUser) {
         userNameInput.value = savedUser
@@ -577,26 +643,36 @@
         }
       }
 
-      const today = formatDateKey(new Date())
-      recordDateInput.value = savedRecordDate || today
-      recordStartInput.value = savedRecordStart || ''
+      userNameInput.addEventListener('change', async () => {
+        localStorage.setItem(USER_KEY, getUserName())
+        ceoAuthenticated = false
+        ceoPasswordSession = ''
+
+        if (isCEOName()) {
+          await requestCEOLogin()
+        }
+
+        renderClips()
+        await loadClips()
+      })
 
       userNameInput.addEventListener('input', () => {
-        localStorage.setItem(USER_KEY, getUserName())
-        renderClips()
+        if (!isCEOName()) {
+          ceoAuthenticated = false
+          ceoPasswordSession = ''
+        }
+        updatePermissions()
       })
 
-      recordDateInput.addEventListener('input', () => {
-        localStorage.setItem(RECORD_DATE_KEY, recordDateInput.value)
-        renderClips()
-      })
-
-      recordStartInput.addEventListener('input', () => {
-        localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
-        renderClips()
+      filterDateInput.addEventListener('input', () => {
+        loadClips()
       })
 
       if (validateSupabaseConfig()) {
+        if (isCEOName()) {
+          await requestCEOLogin()
+        }
+
         await loadClips()
       } else {
         renderClips()
