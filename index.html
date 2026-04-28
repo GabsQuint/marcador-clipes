@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marcador de Clipes do Futebol</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      background: #101820;
+      color: #ffffff;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 720px;
+      background: #182430;
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #b8c4cf;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    .user-box,
+    .record-box,
+    .actions,
+    .list-box {
+      background: #223141;
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      font-size: 14px;
+      color: #d6e2ee;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #3b5066;
+      background: #101820;
+      color: #ffffff;
+      border-radius: 12px;
+      font-size: 16px;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: #45d483;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    @media (min-width: 640px) {
+      .grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 14px;
+      padding: 16px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.08);
+    }
+
+    .primary {
+      background: #45d483;
+      color: #07110b;
+      font-size: 20px;
+      padding: 22px;
+    }
+
+    .secondary {
+      background: #3b82f6;
+      color: #ffffff;
+    }
+
+    .danger {
+      background: #ef4444;
+      color: #ffffff;
+    }
+
+    .muted {
+      background: #34495e;
+      color: #ffffff;
+    }
+
+    .clip-item {
+      background: #101820;
+      border: 1px solid #2f4358;
+      border-radius: 14px;
+      padding: 14px;
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+
+    .clip-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .tag {
+      background: #45d483;
+      color: #07110b;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .small {
+      color: #b8c4cf;
+      font-size: 14px;
+    }
+
+    .empty {
+      color: #b8c4cf;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .notice {
+      background: #2f2511;
+      border: 1px solid #8b6f21;
+      color: #f8df8f;
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <h1>Marcador de Clipes ⚽</h1>
+    <p class="subtitle">
+      Clique no botão quando acontecer uma jogada importante. O site salva o horário real do clique e calcula o tempo aproximado do vídeo.
+    </p>
+
+    <div class="notice">
+      Versão simples para GitHub Pages: os dados ficam salvos neste navegador. Para vários celulares salvarem em uma lista única, use Firebase/Supabase.
+    </div>
+
+    <section class="user-box">
+      <label for="userName">Nome da pessoa</label>
+      <input id="userName" type="text" placeholder="Digite seu nome" />
+    </section>
+
+    <section class="record-box">
+      <div class="grid">
+        <div>
+          <label for="recordDate">Data da gravação</label>
+          <input id="recordDate" type="date" />
+        </div>
+        <div>
+          <label for="recordStart">Horário que começou a gravar</label>
+          <input id="recordStart" type="time" step="1" />
+        </div>
+      </div>
+    </section>
+
+    <section class="actions">
+      <button class="primary" onclick="registerClip()">MARCAR CLIPE AGORA</button>
+      <br /><br />
+      <div class="grid">
+        <button class="secondary" onclick="exportTxt()">Exportar TXT</button>
+        <button class="muted" onclick="changeUser()">Trocar nome</button>
+      </div>
+      <br />
+      <button id="deleteBtn" class="danger" onclick="deleteAll()" style="display: none;">Excluir todos os horários</button>
+    </section>
+
+    <section class="list-box">
+      <h2>Horários marcados</h2>
+      <div id="clipsList"></div>
+    </section>
+  </main>
+
+  <script>
+    const STORAGE_KEY = 'marcador_clipes_futebol_v1'
+    const USER_KEY = 'marcador_clipes_nome'
+    const RECORD_DATE_KEY = 'marcador_clipes_record_date'
+    const RECORD_START_KEY = 'marcador_clipes_record_start'
+
+    const userNameInput = document.getElementById('userName')
+    const recordDateInput = document.getElementById('recordDate')
+    const recordStartInput = document.getElementById('recordStart')
+    const clipsList = document.getElementById('clipsList')
+    const deleteBtn = document.getElementById('deleteBtn')
+
+    function pad(value) {
+      return String(value).padStart(2, '0')
+    }
+
+    function formatDateKey(date) {
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    }
+
+    function formatDateBR(dateKey) {
+      const [year, month, day] = dateKey.split('-')
+      return `${day}/${month}/${year}`
+    }
+
+    function formatTime(date) {
+      return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    }
+
+    function formatDuration(totalSeconds) {
+      if (totalSeconds < 0 || Number.isNaN(totalSeconds)) return 'Início inválido'
+
+      const hours = Math.floor(totalSeconds / 3600)
+      const minutes = Math.floor((totalSeconds % 3600) / 60)
+      const seconds = totalSeconds % 60
+
+      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+    }
+
+    function getClips() {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+    }
+
+    function saveClips(clips) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(clips))
+    }
+
+    function getUserName() {
+      return userNameInput.value.trim()
+    }
+
+    function isCEO() {
+      return getUserName().toUpperCase() === 'CEO'
+    }
+
+    function getRecordingStartDate() {
+      const date = recordDateInput.value
+      const time = recordStartInput.value
+
+      if (!date || !time) return null
+
+      return new Date(`${date}T${time}`)
+    }
+
+    function getVideoTime(clickDate) {
+      const startDate = getRecordingStartDate()
+      if (!startDate) return 'Configure o início da gravação'
+
+      const diffInSeconds = Math.floor((clickDate.getTime() - startDate.getTime()) / 1000)
+      return formatDuration(diffInSeconds)
+    }
+
+    function registerClip() {
+      const userName = getUserName()
+
+      if (!userName) {
+        alert('Digite seu nome antes de marcar o clipe.')
+        userNameInput.focus()
+        return
+      }
+
+      if (!recordDateInput.value || !recordStartInput.value) {
+        alert('Informe a data e o horário que a gravação começou.')
+        return
+      }
+
+      localStorage.setItem(USER_KEY, userName)
+      localStorage.setItem(RECORD_DATE_KEY, recordDateInput.value)
+      localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
+
+      const now = new Date()
+      const clip = {
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+        userName,
+        day: formatDateKey(now),
+        realTime: formatTime(now),
+        timestamp: now.toISOString(),
+        recordingDate: recordDateInput.value,
+        recordingStart: recordStartInput.value,
+        videoTime: getVideoTime(now)
+      }
+
+      const clips = getClips()
+      clips.push(clip)
+      saveClips(clips)
+      renderClips()
+    }
+
+    function deleteClip(id) {
+      if (!isCEO()) {
+        alert('Somente CEO pode excluir horários.')
+        return
+      }
+
+      const clips = getClips().filter(clip => clip.id !== id)
+      saveClips(clips)
+      renderClips()
+    }
+
+    function deleteAll() {
+      if (!isCEO()) {
+        alert('Somente CEO pode excluir horários.')
+        return
+      }
+
+      const confirmed = confirm('Tem certeza que deseja excluir todos os horários?')
+      if (!confirmed) return
+
+      saveClips([])
+      renderClips()
+    }
+
+    function exportTxt() {
+      const clips = getClips()
+
+      if (clips.length === 0) {
+        alert('Nenhum horário marcado ainda.')
+        return
+      }
+
+      const grouped = clips.reduce((acc, clip) => {
+        if (!acc[clip.day]) acc[clip.day] = []
+        acc[clip.day].push(clip)
+        return acc
+      }, {})
+
+      let content = 'MARCADOR DE CLIPES DO FUTEBOL\n'
+      content += '================================\n\n'
+
+      Object.keys(grouped).sort().forEach(day => {
+        content += `DIA ${formatDateBR(day)}\n`
+        content += '--------------------------------\n'
+
+        grouped[day].forEach((clip, index) => {
+          content += `${index + 1}. ${clip.realTime} | Vídeo: ${clip.videoTime} | Pessoa: ${clip.userName}\n`
+        })
+
+        content += '\n'
+      })
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `horarios-clipes-${formatDateKey(new Date())}.txt`
+      link.click()
+      URL.revokeObjectURL(url)
+    }
+
+    function changeUser() {
+      localStorage.removeItem(USER_KEY)
+      userNameInput.value = ''
+      userNameInput.focus()
+      renderClips()
+    }
+
+    function renderClips() {
+      const clips = getClips().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      deleteBtn.style.display = isCEO() ? 'block' : 'none'
+
+      if (clips.length === 0) {
+        clipsList.innerHTML = '<p class="empty">Nenhum horário marcado ainda.</p>'
+        return
+      }
+
+      clipsList.innerHTML = clips.map(clip => `
+        <article class="clip-item">
+          <div class="clip-header">
+            <strong>${formatDateBR(clip.day)} - ${clip.realTime}</strong>
+            <span class="tag">${clip.videoTime}</span>
+          </div>
+          <p class="small">Marcado por: ${clip.userName}</p>
+          <p class="small">Gravação iniciou: ${clip.recordingDate} às ${clip.recordingStart}</p>
+          ${isCEO() ? `<br><button class="danger" onclick="deleteClip('${clip.id}')">Excluir este horário</button>` : ''}
+        </article>
+      `).join('')
+    }
+
+    function loadInitialData() {
+      const savedUser = localStorage.getItem(USER_KEY)
+      const savedRecordDate = localStorage.getItem(RECORD_DATE_KEY)
+      const savedRecordStart = localStorage.getItem(RECORD_START_KEY)
+
+      if (savedUser) {
+        userNameInput.value = savedUser
+      } else {
+        const name = prompt('Digite seu nome:')
+        if (name) {
+          userNameInput.value = name.trim()
+          localStorage.setItem(USER_KEY, name.trim())
+        }
+      }
+
+      const today = formatDateKey(new Date())
+      recordDateInput.value = savedRecordDate || today
+      recordStartInput.value = savedRecordStart || ''
+
+      userNameInput.addEventListener('input', () => {
+        localStorage.setItem(USER_KEY, getUserName())
+        renderClips()
+      })
+
+      recordDateInput.addEventListener('input', () => {
+        localStorage.setItem(RECORD_DATE_KEY, recordDateInput.value)
+      })
+
+      recordStartInput.addEventListener('input', () => {
+        localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
+      })
+
+      renderClips()
+    }
+
+    loadInitialData()
+  </script>
+</body>
+</html>
