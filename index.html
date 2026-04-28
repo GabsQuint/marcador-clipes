@@ -35,6 +35,10 @@
       margin-bottom: 8px;
     }
 
+    h2 {
+      margin-bottom: 12px;
+    }
+
     .subtitle {
       color: #b8c4cf;
       margin-bottom: 24px;
@@ -102,6 +106,12 @@
       filter: brightness(1.08);
     }
 
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+      transform: none;
+    }
+
     .primary {
       background: #45d483;
       color: #07110b;
@@ -148,6 +158,7 @@
       padding: 4px 10px;
       font-size: 12px;
       font-weight: bold;
+      white-space: nowrap;
     }
 
     .small {
@@ -162,14 +173,20 @@
     }
 
     .notice {
-      background: #2f2511;
-      border: 1px solid #8b6f21;
-      color: #f8df8f;
+      background: #142517;
+      border: 1px solid #45d483;
+      color: #b7ffd3;
       border-radius: 14px;
       padding: 12px;
       margin-bottom: 16px;
       font-size: 14px;
       line-height: 1.4;
+    }
+
+    .warning {
+      background: #2f2511;
+      border: 1px solid #8b6f21;
+      color: #f8df8f;
     }
 
     .hidden {
@@ -181,11 +198,11 @@
   <main class="app">
     <h1>Marcador de Clipes ⚽</h1>
     <p class="subtitle">
-      Clique no botão quando acontecer uma jogada importante. O site salva o horário real do clique.
+      Clique no botão quando acontecer uma jogada importante. Agora os horários são salvos no Supabase para todos acessarem a mesma lista.
     </p>
 
-    <div class="notice">
-      Versão simples para GitHub Pages: os dados ficam salvos neste navegador. Para vários celulares salvarem em uma lista única, use Firebase/Supabase.
+    <div id="connectionNotice" class="notice warning">
+      Configurando conexão com Supabase...
     </div>
 
     <section class="user-box">
@@ -207,12 +224,14 @@
     </section>
 
     <section class="actions">
-      <button class="primary" onclick="registerClip()">MARCAR CLIPE AGORA</button>
+      <button id="markBtn" class="primary" onclick="registerClip()">MARCAR CLIPE AGORA</button>
       <br /><br />
       <div class="grid">
         <button id="exportBtn" class="secondary hidden" onclick="exportTxt()">Exportar TXT</button>
         <button class="muted" onclick="changeUser()">Trocar nome</button>
       </div>
+      <br />
+      <button class="muted" onclick="loadClips()">Atualizar lista</button>
       <br id="deleteBreak" class="hidden" />
       <button id="deleteBtn" class="danger hidden" onclick="deleteAll()">Excluir todos os horários</button>
     </section>
@@ -223,8 +242,13 @@
     </section>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    const STORAGE_KEY = 'marcador_clipes_futebol_v2'
+    // 1) Cole aqui os dados do seu projeto Supabase.
+    // Use Project URL e Publishable key. NÃO use service_role e NÃO use Direct connection string.
+    const SUPABASE_URL = 'https://coaxojxclxpxrumsptqx.supabase.co'
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_McTZJCF3QwwO08nfe5ic-A_lUjYPrL-'
+
     const USER_KEY = 'marcador_clipes_nome'
     const RECORD_DATE_KEY = 'marcador_clipes_record_date'
     const RECORD_START_KEY = 'marcador_clipes_record_start'
@@ -237,6 +261,11 @@
     const clipsList = document.getElementById('clipsList')
     const deleteBtn = document.getElementById('deleteBtn')
     const deleteBreak = document.getElementById('deleteBreak')
+    const markBtn = document.getElementById('markBtn')
+    const connectionNotice = document.getElementById('connectionNotice')
+
+    let db = null
+    let clipsCache = []
 
     function pad(value) {
       return String(value).padStart(2, '0')
@@ -260,6 +289,10 @@
       return `${day}/${month}/${year}`
     }
 
+    function formatLocalDateBR(date) {
+      return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`
+    }
+
     function formatTime(date) {
       return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
     }
@@ -272,14 +305,6 @@
       const seconds = totalSeconds % 60
 
       return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
-    }
-
-    function getClips() {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-    }
-
-    function saveClips(clips) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(clips))
     }
 
     function getUserName() {
@@ -299,7 +324,7 @@
       return new Date(`${date}T${time}`)
     }
 
-    function getVideoTime(clickDate) {
+    function getVideoTimeFromClickDate(clickDate) {
       const startDate = getRecordingStartDate()
       if (!startDate) return 'Não configurado'
 
@@ -316,12 +341,38 @@
       deleteBreak.classList.toggle('hidden', !ceo)
     }
 
-    function registerClip() {
+    function validateSupabaseConfig() {
+      const isConfigured =
+        SUPABASE_URL !== 'COLE_AQUI_PROJECT_URL' &&
+        SUPABASE_PUBLISHABLE_KEY !== 'COLE_AQUI_PUBLISHABLE_KEY' &&
+        SUPABASE_URL.startsWith('https://') &&
+        SUPABASE_PUBLISHABLE_KEY.length > 20
+
+      if (!isConfigured) {
+        connectionNotice.textContent = 'Falta colocar o Project URL e a Publishable key do Supabase dentro do código.'
+        connectionNotice.classList.add('warning')
+        markBtn.disabled = true
+        return false
+      }
+
+      db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
+      connectionNotice.textContent = 'Conectado ao Supabase. Os horários agora ficam em uma lista única online.'
+      connectionNotice.classList.remove('warning')
+      markBtn.disabled = false
+      return true
+    }
+
+    async function registerClip() {
       const userName = getUserName()
 
       if (!userName) {
         alert('Digite seu nome antes de marcar o clipe.')
         userNameInput.focus()
+        return
+      }
+
+      if (!db) {
+        alert('Supabase ainda não está configurado no código.')
         return
       }
 
@@ -332,46 +383,98 @@
         localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
       }
 
+      markBtn.disabled = true
+      markBtn.textContent = 'SALVANDO...'
+
       const now = new Date()
-      const clip = {
-        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-        userName,
-        day: formatDateKey(now),
-        realTime: formatTime(now),
-        timestamp: now.toISOString(),
-        recordingDate: recordDateInput.value || '',
-        recordingStart: recordStartInput.value || '',
-        videoTime: getVideoTime(now)
+
+      const { error } = await db
+        .from('clips')
+        .insert({
+          user_name: userName,
+          client_clicked_at: now.toISOString()
+        })
+
+      markBtn.disabled = false
+      markBtn.textContent = 'MARCAR CLIPE AGORA'
+
+      if (error) {
+        console.error(error)
+        alert('Erro ao salvar no Supabase. Confira se a tabela e as policies foram criadas.')
+        return
       }
 
-      const clips = getClips()
-      clips.push(clip)
-      saveClips(clips)
+      await loadClips()
+    }
+
+    async function loadClips() {
+      if (!db) return
+
+      clipsList.innerHTML = '<p class="empty">Carregando horários...</p>'
+
+      const { data, error } = await db
+        .from('clips')
+        .select('id, user_name, client_clicked_at, created_at')
+        .order('client_clicked_at', { ascending: false })
+
+      if (error) {
+        console.error(error)
+        clipsList.innerHTML = '<p class="empty">Erro ao carregar horários. Confira a tabela e as policies no Supabase.</p>'
+        return
+      }
+
+      clipsCache = data || []
       renderClips()
     }
 
-    function deleteClip(id) {
+    async function deleteClip(id) {
       if (!isCEO()) {
         alert('Somente CEO pode excluir horários.')
         return
       }
 
-      const clips = getClips().filter(clip => clip.id !== id)
-      saveClips(clips)
-      renderClips()
+      if (!db) return
+
+      const confirmed = confirm('Excluir este horário?')
+      if (!confirmed) return
+
+      const { error } = await db
+        .from('clips')
+        .delete()
+        .eq('id', id)
+
+      if (error) {
+        console.error(error)
+        alert('Erro ao excluir. Confira se a policy de DELETE foi criada no Supabase.')
+        return
+      }
+
+      await loadClips()
     }
 
-    function deleteAll() {
+    async function deleteAll() {
       if (!isCEO()) {
         alert('Somente CEO pode excluir horários.')
         return
       }
+
+      if (!db) return
 
       const confirmed = confirm('Tem certeza que deseja excluir todos os horários?')
       if (!confirmed) return
 
-      saveClips([])
-      renderClips()
+      const { error } = await db
+        .from('clips')
+        .delete()
+        .gte('created_at', '1900-01-01')
+
+      if (error) {
+        console.error(error)
+        alert('Erro ao excluir todos. Confira se a policy de DELETE foi criada no Supabase.')
+        return
+      }
+
+      await loadClips()
     }
 
     function exportTxt() {
@@ -380,16 +483,17 @@
         return
       }
 
-      const clips = getClips()
-
-      if (clips.length === 0) {
+      if (clipsCache.length === 0) {
         alert('Nenhum horário marcado ainda.')
         return
       }
 
-      const grouped = clips.reduce((acc, clip) => {
-        if (!acc[clip.day]) acc[clip.day] = []
-        acc[clip.day].push(clip)
+      const grouped = clipsCache.reduce((acc, clip) => {
+        const clickDate = new Date(clip.client_clicked_at)
+        const day = formatDateKey(clickDate)
+
+        if (!acc[day]) acc[day] = []
+        acc[day].push(clip)
         return acc
       }, {})
 
@@ -400,9 +504,15 @@
         content += `DIA ${formatDateBR(day)}\n`
         content += '--------------------------------\n'
 
-        grouped[day].forEach((clip, index) => {
-          content += `${index + 1}. ${clip.realTime} | Vídeo: ${clip.videoTime} | Pessoa: ${clip.userName}\n`
-        })
+        grouped[day]
+          .sort((a, b) => new Date(a.client_clicked_at) - new Date(b.client_clicked_at))
+          .forEach((clip, index) => {
+            const clickDate = new Date(clip.client_clicked_at)
+            const realTime = formatTime(clickDate)
+            const videoTime = getVideoTimeFromClickDate(clickDate)
+
+            content += `${index + 1}. ${realTime} | Vídeo: ${videoTime} | Pessoa: ${clip.user_name}\n`
+          })
 
         content += '\n'
       })
@@ -426,7 +536,7 @@
     function renderClips() {
       updatePermissions()
 
-      const clips = getClips().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      const clips = [...clipsCache].sort((a, b) => new Date(b.client_clicked_at) - new Date(a.client_clicked_at))
       const ceo = isCEO()
 
       if (clips.length === 0) {
@@ -434,20 +544,25 @@
         return
       }
 
-      clipsList.innerHTML = clips.map(clip => `
-        <article class="clip-item">
-          <div class="clip-header">
-            <strong>${formatDateBR(clip.day)} - ${escapeHtml(clip.realTime)}</strong>
-            ${ceo ? `<span class="tag">${escapeHtml(clip.videoTime)}</span>` : ''}
-          </div>
-          <p class="small">Marcado por: ${escapeHtml(clip.userName)}</p>
-          ${ceo ? `<p class="small">Gravação iniciou: ${escapeHtml(clip.recordingDate || 'Não informado')} às ${escapeHtml(clip.recordingStart || 'Não informado')}</p>` : ''}
-          ${ceo ? `<br><button class="danger" onclick="deleteClip('${clip.id}')">Excluir este horário</button>` : ''}
-        </article>
-      `).join('')
+      clipsList.innerHTML = clips.map(clip => {
+        const clickDate = new Date(clip.client_clicked_at)
+        const videoTime = getVideoTimeFromClickDate(clickDate)
+
+        return `
+          <article class="clip-item">
+            <div class="clip-header">
+              <strong>${formatLocalDateBR(clickDate)} - ${formatTime(clickDate)}</strong>
+              ${ceo ? `<span class="tag">${escapeHtml(videoTime)}</span>` : ''}
+            </div>
+            <p class="small">Marcado por: ${escapeHtml(clip.user_name)}</p>
+            ${ceo ? `<p class="small">Tempo do vídeo calculado pelo horário de início da gravação.</p>` : ''}
+            ${ceo ? `<br><button class="danger" onclick="deleteClip('${clip.id}')">Excluir este horário</button>` : ''}
+          </article>
+        `
+      }).join('')
     }
 
-    function loadInitialData() {
+    async function loadInitialData() {
       const savedUser = localStorage.getItem(USER_KEY)
       const savedRecordDate = localStorage.getItem(RECORD_DATE_KEY)
       const savedRecordStart = localStorage.getItem(RECORD_START_KEY)
@@ -473,13 +588,19 @@
 
       recordDateInput.addEventListener('input', () => {
         localStorage.setItem(RECORD_DATE_KEY, recordDateInput.value)
+        renderClips()
       })
 
       recordStartInput.addEventListener('input', () => {
         localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
+        renderClips()
       })
 
-      renderClips()
+      if (validateSupabaseConfig()) {
+        await loadClips()
+      } else {
+        renderClips()
+      }
     }
 
     loadInitialData()
