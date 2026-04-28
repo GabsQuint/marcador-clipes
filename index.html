@@ -332,7 +332,7 @@
 
       if (error) {
         console.error(error)
-        alert('Erro ao validar senha do CEO. Confira se a função verify_ceo_password foi criada no Supabase.')
+        alert(`Erro ao validar senha do CEO: ${error.message}`)
         ceoAuthenticated = false
         ceoPasswordSession = ''
         return false
