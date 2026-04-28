@@ -171,13 +171,17 @@
       font-size: 14px;
       line-height: 1.4;
     }
+
+    .hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
   <main class="app">
     <h1>Marcador de Clipes ⚽</h1>
     <p class="subtitle">
-      Clique no botão quando acontecer uma jogada importante. O site salva o horário real do clique e calcula o tempo aproximado do vídeo.
+      Clique no botão quando acontecer uma jogada importante. O site salva o horário real do clique.
     </p>
 
     <div class="notice">
@@ -189,7 +193,7 @@
       <input id="userName" type="text" placeholder="Digite seu nome" />
     </section>
 
-    <section class="record-box">
+    <section id="recordBox" class="record-box hidden">
       <div class="grid">
         <div>
           <label for="recordDate">Data da gravação</label>
@@ -206,11 +210,11 @@
       <button class="primary" onclick="registerClip()">MARCAR CLIPE AGORA</button>
       <br /><br />
       <div class="grid">
-        <button class="secondary" onclick="exportTxt()">Exportar TXT</button>
+        <button id="exportBtn" class="secondary hidden" onclick="exportTxt()">Exportar TXT</button>
         <button class="muted" onclick="changeUser()">Trocar nome</button>
       </div>
-      <br />
-      <button id="deleteBtn" class="danger" onclick="deleteAll()" style="display: none;">Excluir todos os horários</button>
+      <br id="deleteBreak" class="hidden" />
+      <button id="deleteBtn" class="danger hidden" onclick="deleteAll()">Excluir todos os horários</button>
     </section>
 
     <section class="list-box">
@@ -220,7 +224,7 @@
   </main>
 
   <script>
-    const STORAGE_KEY = 'marcador_clipes_futebol_v1'
+    const STORAGE_KEY = 'marcador_clipes_futebol_v2'
     const USER_KEY = 'marcador_clipes_nome'
     const RECORD_DATE_KEY = 'marcador_clipes_record_date'
     const RECORD_START_KEY = 'marcador_clipes_record_start'
@@ -228,11 +232,23 @@
     const userNameInput = document.getElementById('userName')
     const recordDateInput = document.getElementById('recordDate')
     const recordStartInput = document.getElementById('recordStart')
+    const recordBox = document.getElementById('recordBox')
+    const exportBtn = document.getElementById('exportBtn')
     const clipsList = document.getElementById('clipsList')
     const deleteBtn = document.getElementById('deleteBtn')
+    const deleteBreak = document.getElementById('deleteBreak')
 
     function pad(value) {
       return String(value).padStart(2, '0')
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;')
     }
 
     function formatDateKey(date) {
@@ -285,10 +301,19 @@
 
     function getVideoTime(clickDate) {
       const startDate = getRecordingStartDate()
-      if (!startDate) return 'Configure o início da gravação'
+      if (!startDate) return 'Não configurado'
 
       const diffInSeconds = Math.floor((clickDate.getTime() - startDate.getTime()) / 1000)
       return formatDuration(diffInSeconds)
+    }
+
+    function updatePermissions() {
+      const ceo = isCEO()
+
+      recordBox.classList.toggle('hidden', !ceo)
+      exportBtn.classList.toggle('hidden', !ceo)
+      deleteBtn.classList.toggle('hidden', !ceo)
+      deleteBreak.classList.toggle('hidden', !ceo)
     }
 
     function registerClip() {
@@ -300,14 +325,12 @@
         return
       }
 
-      if (!recordDateInput.value || !recordStartInput.value) {
-        alert('Informe a data e o horário que a gravação começou.')
-        return
-      }
-
       localStorage.setItem(USER_KEY, userName)
-      localStorage.setItem(RECORD_DATE_KEY, recordDateInput.value)
-      localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
+
+      if (isCEO()) {
+        localStorage.setItem(RECORD_DATE_KEY, recordDateInput.value)
+        localStorage.setItem(RECORD_START_KEY, recordStartInput.value)
+      }
 
       const now = new Date()
       const clip = {
@@ -316,8 +339,8 @@
         day: formatDateKey(now),
         realTime: formatTime(now),
         timestamp: now.toISOString(),
-        recordingDate: recordDateInput.value,
-        recordingStart: recordStartInput.value,
+        recordingDate: recordDateInput.value || '',
+        recordingStart: recordStartInput.value || '',
         videoTime: getVideoTime(now)
       }
 
@@ -352,6 +375,11 @@
     }
 
     function exportTxt() {
+      if (!isCEO()) {
+        alert('Somente CEO pode exportar os horários.')
+        return
+      }
+
       const clips = getClips()
 
       if (clips.length === 0) {
@@ -396,8 +424,10 @@
     }
 
     function renderClips() {
+      updatePermissions()
+
       const clips = getClips().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      deleteBtn.style.display = isCEO() ? 'block' : 'none'
+      const ceo = isCEO()
 
       if (clips.length === 0) {
         clipsList.innerHTML = '<p class="empty">Nenhum horário marcado ainda.</p>'
@@ -407,12 +437,12 @@
       clipsList.innerHTML = clips.map(clip => `
         <article class="clip-item">
           <div class="clip-header">
-            <strong>${formatDateBR(clip.day)} - ${clip.realTime}</strong>
-            <span class="tag">${clip.videoTime}</span>
+            <strong>${formatDateBR(clip.day)} - ${escapeHtml(clip.realTime)}</strong>
+            ${ceo ? `<span class="tag">${escapeHtml(clip.videoTime)}</span>` : ''}
           </div>
-          <p class="small">Marcado por: ${clip.userName}</p>
-          <p class="small">Gravação iniciou: ${clip.recordingDate} às ${clip.recordingStart}</p>
-          ${isCEO() ? `<br><button class="danger" onclick="deleteClip('${clip.id}')">Excluir este horário</button>` : ''}
+          <p class="small">Marcado por: ${escapeHtml(clip.userName)}</p>
+          ${ceo ? `<p class="small">Gravação iniciou: ${escapeHtml(clip.recordingDate || 'Não informado')} às ${escapeHtml(clip.recordingStart || 'Não informado')}</p>` : ''}
+          ${ceo ? `<br><button class="danger" onclick="deleteClip('${clip.id}')">Excluir este horário</button>` : ''}
         </article>
       `).join('')
     }
